@@ -20,7 +20,7 @@ body{background:var(--paper);color:var(--ink);font-family:var(--sans);-webkit-fo
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
 /* ---------- setup ---------- */
-#setup{min-height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:36px;padding:56px 22px;max-width:920px;margin:0 auto;position:relative}
+#setup{min-height:100%;min-height:100svh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:36px;padding:56px 22px;max-width:920px;margin:0 auto;position:relative}
 .side-label{position:fixed;left:22px;top:50%;transform:translateY(-50%);writing-mode:vertical-rl;font-family:var(--serif);font-size:13px;letter-spacing:.5em;color:var(--dim);opacity:.7;pointer-events:none}
 @media(max-width:1080px){.side-label{display:none}}
 header{text-align:center}
@@ -63,6 +63,24 @@ select{background:var(--panel);border:1px solid var(--line);color:var(--ink);bor
 #hud button:hover{color:var(--ink);border-color:var(--accent-soft)}
 #stat{position:absolute;left:16px;bottom:14px;font-family:var(--mono);font-size:12px;color:var(--dim);opacity:0;transition:opacity 1.2s}
 #stat.show{opacity:1}
+
+/* ---------- mobile ---------- */
+@media(max-width:600px){
+  #setup{gap:26px;padding:36px 16px calc(28px + env(safe-area-inset-bottom))}
+  .lead{font-size:12.5px;text-align:left}
+  .lead br{display:none}
+  .card{min-height:0;padding:16px}
+  #dropImg{min-height:150px}
+  textarea{min-height:150px;font-size:16px}
+  select{font-size:16px;padding:8px 10px}
+  .row{flex-direction:column;align-items:stretch;gap:12px;width:100%}
+  .sel{justify-content:space-between;gap:12px}
+  .sel select{flex:1;max-width:65%}
+  #start{width:100%;padding:15px 0;margin-top:6px}
+  #hud{top:auto;left:12px;right:12px;bottom:calc(12px + env(safe-area-inset-bottom));flex-wrap:nowrap;justify-content:stretch}
+  #hud button{flex:1;padding:12px 4px;font-size:11px;letter-spacing:.02em;white-space:nowrap}
+  #stat{left:12px;right:12px;bottom:auto;top:calc(12px + env(safe-area-inset-top));font-size:11px}
+}
 </style>
 </head>
 <body>
@@ -464,17 +482,48 @@ cv.addEventListener('wheel',e=>{
   cam.s=clamp(cam.s*Math.exp(-e.deltaY*.0016), fitScale(w,h)*.4, 60);
   cam.x=wx-(mx-w/2)/cam.s; cam.y=wy-(my-h/2)/cam.s;
 },{passive:false});
+const ptrs=new Map(); let pinchSt=null;
 cv.addEventListener('pointerdown',e=>{
   if(!interactive)return; settle=false;
-  dragSt={x:e.clientX,y:e.clientY,cx:cam.x,cy:cam.y};
-  cv.setPointerCapture(e.pointerId); cv.style.cursor='grabbing';
+  ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  cv.setPointerCapture(e.pointerId);
+  if(ptrs.size===2){
+    const [a,b]=[...ptrs.values()];
+    pinchSt={d:Math.hypot(a.x-b.x,a.y-b.y),s:cam.s,cx:cam.x,cy:cam.y,mx:(a.x+b.x)/2,my:(a.y+b.y)/2};
+    dragSt=null;
+  } else if(ptrs.size===1){
+    dragSt={x:e.clientX,y:e.clientY,cx:cam.x,cy:cam.y};
+    cv.style.cursor='grabbing';
+  }
 });
 cv.addEventListener('pointermove',e=>{
-  if(!dragSt)return;
-  cam.x=dragSt.cx-(e.clientX-dragSt.x)/cam.s;
-  cam.y=dragSt.cy-(e.clientY-dragSt.y)/cam.s;
+  if(!ptrs.has(e.pointerId))return;
+  ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  if(pinchSt&&ptrs.size===2){
+    const [a,b]=[...ptrs.values()];
+    const w=stage.clientWidth,h=stage.clientHeight;
+    const rect=cv.getBoundingClientRect();
+    const wx=pinchSt.cx+(pinchSt.mx-rect.left-w/2)/pinchSt.s;
+    const wy=pinchSt.cy+(pinchSt.my-rect.top-h/2)/pinchSt.s;
+    const mx=(a.x+b.x)/2-rect.left, my=(a.y+b.y)/2-rect.top;
+    cam.s=clamp(pinchSt.s*Math.hypot(a.x-b.x,a.y-b.y)/Math.max(1,pinchSt.d), fitScale(w,h)*.4, 60);
+    cam.x=wx-(mx-w/2)/cam.s; cam.y=wy-(my-h/2)/cam.s;
+  } else if(dragSt){
+    cam.x=dragSt.cx-(e.clientX-dragSt.x)/cam.s;
+    cam.y=dragSt.cy-(e.clientY-dragSt.y)/cam.s;
+  }
 });
-addEventListener('pointerup',()=>{ dragSt=null; if(interactive)cv.style.cursor='grab'; });
+const endPtr=e=>{
+  ptrs.delete(e.pointerId);
+  if(ptrs.size<2)pinchSt=null;
+  if(ptrs.size===0){ dragSt=null; if(interactive)cv.style.cursor='grab'; }
+  else if(ptrs.size===1&&!pinchSt){
+    const [p]=[...ptrs.values()];
+    dragSt={x:p.x,y:p.y,cx:cam.x,cy:cam.y};
+  }
+};
+addEventListener('pointerup',endPtr);
+addEventListener('pointercancel',endPtr);
 cv.addEventListener('dblclick',()=>{ if(interactive)settle=true; });
 })();
 </script>
