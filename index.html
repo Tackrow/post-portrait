@@ -77,8 +77,8 @@ select{background:var(--panel);border:1px solid var(--line);color:var(--ink);bor
   .sel{justify-content:space-between;gap:12px}
   .sel select{flex:1;max-width:65%}
   #start{width:100%;padding:15px 0;margin-top:6px}
-  #hud{top:auto;left:12px;right:12px;bottom:calc(12px + env(safe-area-inset-bottom));flex-wrap:nowrap;justify-content:stretch}
-  #hud button{flex:1;padding:12px 4px;font-size:11px;letter-spacing:.02em;white-space:nowrap}
+  #hud{top:auto;left:12px;right:12px;bottom:calc(12px + env(safe-area-inset-bottom));justify-content:stretch}
+  #hud button{flex:1 1 30%;padding:12px 4px;font-size:11px;letter-spacing:.02em;white-space:nowrap}
   #stat{left:12px;right:12px;bottom:auto;top:calc(12px + env(safe-area-inset-top));font-size:11px}
 }
 </style>
@@ -142,6 +142,7 @@ select{background:var(--panel);border:1px solid var(--line);color:var(--ink);bor
   <div id="hud">
     <button id="skip">最後まで送る</button>
     <button id="replay">もう一度</button>
+    <button id="rec">動画で保存</button>
     <button id="save">PNG保存</button>
     <button id="back">設定に戻る</button>
   </div>
@@ -363,7 +364,7 @@ function frame(now){
     if(!camInit){cam.x=tx;cam.y=ty;cam.s=sT;camInit=true;}
     cam.x+=(tx-cam.x)*.18; cam.y+=(ty-cam.y)*.18;
     cam.s=Math.exp(Math.log(cam.s)+(Math.log(sT)-Math.log(cam.s))*.12);
-    if(p>=1){printed=N; playing=false; done=true; interactive=true; settle=true; showStat();}
+    if(p>=1){printed=N; playing=false; done=true; interactive=true; settle=true; showStat(); finishRecording();}
   } else if(done&&settle){
     cam.s+=(s1-cam.s)*.08;
     cam.x+=(worldW/2-cam.x)*.08; cam.y+=(worldH/2-cam.y)*.08;
@@ -443,18 +444,67 @@ function showStat(){
   $('stat').classList.add('show');
   cv.style.cursor='grab';
 }
-$('skip').addEventListener('click',()=>{ if(playing)t0=performance.now()-DUR; });
-$('replay').addEventListener('click',()=>{
-  if(!baked)return;
+function restartPlay(){
   stamped=0; bctx.clearRect(0,0,baked.width,baked.height);
   done=false; interactive=false; settle=false; camInit=false; dragSt=null;
   $('stat').classList.remove('show'); cv.style.cursor='default';
   t0=performance.now(); playing=true;
+}
+$('skip').addEventListener('click',()=>{ if(playing)t0=performance.now()-DUR; });
+$('replay').addEventListener('click',()=>{
+  if(!baked)return;
+  abortRecording();
+  restartPlay();
 });
 $('back').addEventListener('click',()=>{
+  abortRecording();
   cancelAnimationFrame(raf); playing=false;
   stage.hidden=true; setupEl.hidden=false;
 });
+
+/* ---------- 動画の録画（印字をもう一度再生しながら記録） ---------- */
+const recBtn=$('rec');
+let rec=null,recChunks=null,recAbort=false;
+if(typeof MediaRecorder==='undefined'||!cv.captureStream)recBtn.hidden=true;
+function recMime(){
+  return ['video/mp4','video/webm;codecs=vp9','video/webm'].find(t=>MediaRecorder.isTypeSupported(t))||'';
+}
+function resetRecUI(){
+  rec=null; recChunks=null;
+  recBtn.textContent='動画で保存'; recBtn.disabled=false;
+}
+recBtn.addEventListener('click',()=>{
+  if(!baked||rec)return;
+  const mime=recMime();
+  recChunks=[];
+  try{
+    rec=new MediaRecorder(cv.captureStream(30),mime?{mimeType:mime,videoBitsPerSecond:8e6}:{videoBitsPerSecond:8e6});
+  }catch(_){recBtn.hidden=true;return;}
+  rec.ondataavailable=e=>{ if(e.data&&e.data.size)recChunks.push(e.data); };
+  rec.onstop=()=>{
+    if(recAbort){recAbort=false;resetRecUI();return;}
+    const type=(rec&&rec.mimeType)||mime||'video/webm';
+    const blob=new Blob(recChunks,{type});
+    const a=document.createElement('a');
+    a.download='post-portrait.'+(/mp4/.test(type)?'mp4':'webm');
+    a.href=URL.createObjectURL(blob);
+    a.click();
+    setTimeout(()=>URL.revokeObjectURL(a.href),10000);
+    resetRecUI();
+  };
+  rec.start(500);
+  recBtn.textContent='録画中…'; recBtn.disabled=true;
+  restartPlay();
+});
+function finishRecording(){
+  if(!rec)return;
+  // 引き切った画をすこし収めてから止める
+  setTimeout(()=>{ if(rec&&rec.state==='recording')rec.stop(); },1400);
+}
+function abortRecording(){
+  if(rec&&rec.state!=='inactive'){recAbort=true;rec.stop();}
+  else if(rec)resetRecUI();
+}
 $('save').addEventListener('click',()=>{
   if(!baked)return;
   const pad=Math.round(baked.width*.05);
